@@ -59,8 +59,10 @@ def _resolve_maven(package_dir: RootedPath, deps_dir: RootedPath) -> list[MavenC
     lockfile = MavenLockfile.from_file(lockfile_path)
     dependencies = lockfile.get_dependencies_to_download()
     plugins = lockfile.get_plugins_to_download()
+    boms = lockfile.get_boms_to_download()
+    extensions = lockfile.get_extensions_to_download()
 
-    _download_maven_artifacts(deps_dir.path, dependencies, plugins)
+    _download_maven_artifacts(deps_dir.path, dependencies, plugins, boms, extensions)
     # TODO: Return SBOM components
     return []
 
@@ -69,9 +71,11 @@ def _download_maven_artifacts(
     deps_dir: Path,
     dependencies: dict[str, dict[str, Any]],
     plugins: dict[str, dict[str, Any]],
+    boms: dict[str, dict[str, Any]],
+    extensions: dict[str, dict[str, Any]],
 ) -> None:
     """Download Maven dependencies."""
-    maven_stuff = {**dependencies, **plugins}
+    maven_stuff = {**dependencies, **plugins, **boms, **extensions}
 
     download_paths, artifacts = _prepare_artifact_downloads(maven_stuff, deps_dir)
     pom_files, pom_checksums = _prepare_pom_and_checksum_downloads(maven_stuff, download_paths)
@@ -145,7 +149,9 @@ def _prepare_pom_and_checksum_downloads(
             pom_file_url = url.replace(url_path.name, pom_filename)
 
             artifact_dir = download_paths[url].parent
-            pom_files[pom_file_url] = artifact_dir / pom_filename
+
+            if pom_file_url not in download_paths:
+                pom_files[pom_file_url] = artifact_dir / pom_filename
 
             algorithm = convert_java_checksum_algorithm_to_python(dep_info["checksum_algorithm"])
             pom_checksum_url = f"{pom_file_url}.{algorithm}"

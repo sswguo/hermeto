@@ -7,6 +7,46 @@ from packageurl import PackageURL
 from hermeto.core.rooted_path import RootedPath
 
 
+def _extract_artifact(
+    artifact: dict[str, Any], result: dict[str, dict[str, str | None]]
+) -> None:
+    """Add an artifact's resolved URL and download info to result if not already present."""
+    resolved_url = artifact.get("resolved")
+    if resolved_url and resolved_url not in result:
+        raw_checksum = artifact.get("checksum")
+        result[resolved_url] = {
+            # Some checksums have additional information after the hash (e.g. "abc123  filename.jar"),
+            # so take only the first token.
+            "checksum": raw_checksum.split()[0] if raw_checksum else None,
+            "checksum_algorithm": artifact.get("checksumAlgorithm"),
+            "group_id": artifact.get("groupId"),
+            "artifact_id": artifact.get("artifactId"),
+            "version": artifact.get("version"),
+        }
+
+
+def _extract_pom_chain(
+    pom: dict[str, Any] | None, result: dict[str, dict[str, str | None]]
+) -> None:
+    """Recursively walk a pom and its parent chain, adding all POM URLs to result."""
+    if not pom:
+        return
+    _extract_artifact(pom, result)
+    _extract_pom_chain(pom.get("parent"), result)
+
+
+def _extract_dependency(
+    artifact: dict[str, Any], result: dict[str, dict[str, str | None]]
+) -> None:
+    """Collect an artifact, its full transitive subtree, pom parent chains, and bom imports."""
+    _extract_artifact(artifact, result)
+    _extract_pom_chain(artifact.get("pom"), result)
+    for bom in artifact.get("boms", []):
+        _extract_pom_chain(bom, result)
+    for child in artifact.get("children", []):
+        _extract_dependency(child, result)
+
+
 @dataclass
 class MavenComponent:
     """Maven component."""
@@ -74,6 +114,16 @@ class MavenDependency:
     def children(self) -> list[dict[str, Any]]:
         """Get the children dependencies."""
         return self._dependency_dict.get("children", [])
+
+    @property
+    def boms(self) -> list[dict[str, Any]]:
+        """Get the boms dependencies."""
+        return self._dependency_dict.get("boms", [])
+
+    @property
+    def pom(self) -> dict[str, Any]:
+        """Get the pom dependencies."""
+        return self._dependency_dict.get("pom", {})
 
     def to_component(self) -> MavenComponent:
         """Convert to MavenComponent."""
@@ -154,7 +204,7 @@ class MavenLockfile:
         result = {}
 
         for dependency in self.dependencies:
-            if dependency.resolved_url:
+            if dependency.resolved_url and dependency.resolved_url not in result:
                 result[dependency.resolved_url] = {
                     "checksum": dependency.checksum,
                     "checksum_algorithm": dependency.checksum_algorithm,
@@ -162,6 +212,9 @@ class MavenLockfile:
                     "artifact_id": dependency.artifact_id,
                     "version": dependency.version,
                 }
+            _extract_pom_chain(dependency.pom, result)
+            for bom in dependency.boms:
+                _extract_pom_chain(bom, result)
 
         return result
 
@@ -169,33 +222,35 @@ class MavenLockfile:
         """Get dictionary of plugins and their dependencies to download."""
         result = {}
 
-        def extract_dependency(dependency: dict[str, Any]) -> None:
-            """Recursively extract a dependency and its children."""
-            resolved_url = dependency.get("resolved")
-            if resolved_url and resolved_url not in result:
-                result[resolved_url] = {
-                    "checksum": dependency.get("checksum"),
-                    "checksum_algorithm": dependency.get("checksumAlgorithm"),
-                    "group_id": dependency.get("groupId"),
-                    "artifact_id": dependency.get("artifactId"),
-                    "version": dependency.get("version"),
-                }
-
-            for child in dependency.get("children", []):
-                extract_dependency(child)
-
         for plugin in self.lockfile_data.get("mavenPlugins", []):
-            resolved_url = plugin.get("resolved")
-            if resolved_url:
-                result[resolved_url] = {
-                    "checksum": plugin.get("checksum"),
-                    "checksum_algorithm": plugin.get("checksumAlgorithm"),
-                    "group_id": plugin.get("groupId"),
-                    "artifact_id": plugin.get("artifactId"),
-                    "version": plugin.get("version"),
-                }
-
+            _extract_artifact(plugin, result)
+            _extract_pom_chain(plugin.get("pom"), result)
+            for bom in plugin.get("boms", []):
+                _extract_pom_chain(bom, result)
             for dependency in plugin.get("dependencies", []):
-                extract_dependency(dependency)
+                _extract_dependency(dependency, result)
+
+        return result
+
+    def get_boms_to_download(self) -> dict[str, dict[str, str | None]]:
+        """Get dictionary of BOMs to download."""
+        result = {}
+
+        for bom in self.lockfile_data.get("boms", []):
+            _extract_pom_chain(bom, result)
+
+        return result
+
+    def get_extensions_to_download(self) -> dict[str, dict[str, str | None]]:
+        """Get dictionary of build extensions and their dependencies to download."""
+        result = {}
+
+        for extension in self.lockfile_data.get("extensions", []):
+            _extract_artifact(extension, result)
+            _extract_pom_chain(extension.get("pom"), result)
+            for bom in extension.get("boms", []):
+                _extract_pom_chain(bom, result)
+            for dependency in extension.get("dependencies", []):
+                _extract_dependency(dependency, result)
 
         return result
