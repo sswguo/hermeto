@@ -29,7 +29,7 @@ def _extract_pom_chain(
     pom: dict[str, Any] | None, result: dict[str, dict[str, str | None]]
 ) -> None:
     """Recursively walk a pom and its parent chain, adding all POM URLs to result."""
-    if not pom:
+    if not pom or not isinstance(pom, dict):
         return
     _extract_artifact(pom, result)
     _extract_pom_chain(pom.get("parent"), result)
@@ -40,6 +40,7 @@ def _extract_dependency(
 ) -> None:
     """Collect an artifact, its full transitive subtree, pom parent chains, and bom imports."""
     _extract_artifact(artifact, result)
+    _extract_pom_chain(artifact.get("parent"), result)
     _extract_pom_chain(artifact.get("pom"), result)
     for bom in artifact.get("boms", []):
         _extract_pom_chain(bom, result)
@@ -224,6 +225,7 @@ class MavenLockfile:
 
         for plugin in self.lockfile_data.get("mavenPlugins", []):
             _extract_artifact(plugin, result)
+            _extract_pom_chain(plugin.get("parent"), result)
             _extract_pom_chain(plugin.get("pom"), result)
             for bom in plugin.get("boms", []):
                 _extract_pom_chain(bom, result)
@@ -247,10 +249,20 @@ class MavenLockfile:
 
         for extension in self.lockfile_data.get("extensions", []):
             _extract_artifact(extension, result)
+            _extract_pom_chain(extension.get("parent"), result)
             _extract_pom_chain(extension.get("pom"), result)
             for bom in extension.get("boms", []):
                 _extract_pom_chain(bom, result)
             for dependency in extension.get("dependencies", []):
                 _extract_dependency(dependency, result)
+
+        return result
+
+    def get_parent_pom_to_download(self):
+        result = {}
+
+        pom = self.lockfile_data.get("pom", {})
+        if pom:
+            _extract_pom_chain(pom, result)
 
         return result
