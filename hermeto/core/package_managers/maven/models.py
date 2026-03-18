@@ -22,6 +22,7 @@ def _extract_artifact(
             "group_id": artifact.get("groupId"),
             "artifact_id": artifact.get("artifactId"),
             "version": artifact.get("version"),
+            "classifier": artifact.get("classifier"),
         }
 
 
@@ -46,6 +47,39 @@ def _extract_dependency(
         _extract_pom_chain(bom, result)
     for child in artifact.get("children", []):
         _extract_dependency(child, result)
+
+
+def _components_from_dict(artifacts: dict[str, dict[str, Any]]) -> list["MavenComponent"]:
+    """Build a deduplicated list of MavenComponent from an artifact download dict."""
+    result = []
+    for url, info in artifacts.items():
+        group_id = info.get("group_id")
+        artifact_id = info.get("artifact_id")
+        version = info.get("version")
+        if not (group_id and artifact_id and version):
+            continue
+        if url.endswith(".pom"):
+            qualifiers = {"type": "pom"}
+        else:
+            qualifiers = {"type": "jar"}
+            if classifier := info.get("classifier"):
+                qualifiers["classifier"] = classifier
+        purl = PackageURL(
+            type="maven",
+            namespace=group_id,
+            name=artifact_id,
+            version=version,
+            qualifiers=qualifiers,
+        )
+        result.append(
+            MavenComponent(
+                name=f"{group_id}:{artifact_id}",
+                purl=purl.to_string(),
+                version=version,
+                scope="",
+            )
+        )
+    return result
 
 
 @dataclass
@@ -107,6 +141,11 @@ class MavenDependency:
         return self._dependency_dict.get("checksumAlgorithm")
 
     @property
+    def classifier(self) -> str | None:
+        """Get the classifier."""
+        return self._dependency_dict.get("classifier")
+
+    @property
     def resolved_url(self) -> str | None:
         """Get the resolved URL."""
         return self._dependency_dict.get("resolved")
@@ -128,11 +167,15 @@ class MavenDependency:
 
     def to_component(self) -> MavenComponent:
         """Convert to MavenComponent."""
+        qualifiers: dict[str, str] = {"type": "jar"}
+        if self.classifier:
+            qualifiers["classifier"] = self.classifier
         purl = PackageURL(
             type="maven",
             namespace=self.group_id,
             name=self.artifact_id,
             version=self.version,
+            qualifiers=qualifiers,
         )
         return MavenComponent(
             name=self.name,
@@ -187,6 +230,7 @@ class MavenLockfile:
             namespace=group_id,
             name=artifact_id,
             version=version,
+            qualifiers={"type": "jar"},
         )
 
         return MavenComponent(
@@ -196,9 +240,19 @@ class MavenLockfile:
             scope="compile",
         )
 
-    def get_sbom_components(self) -> list[MavenComponent]:
-        """Get all dependencies as MavenComponent objects."""
-        return [dependency.to_component() for dependency in self.dependencies]
+    def get_sbom_components(self, maven_stuff: dict[str, dict[str, Any]]) -> list[MavenComponent]:
+        """Build the full flat SBOM component list from the merged download dict.
+
+        The dict is computed once in _resolve_maven and reused here — no second traversal.
+        Regular dependencies are handled separately via self.dependencies to preserve scope info.
+        """
+        dep_urls = {dep.resolved_url for dep in self.dependencies if dep.resolved_url}
+        extras = {url: info for url, info in maven_stuff.items() if url not in dep_urls}
+        return (
+            [self.get_main_package()]
+            + [dep.to_component() for dep in self.dependencies]
+            + _components_from_dict(extras)
+        )
 
     def get_dependencies_to_download(self) -> dict[str, dict[str, str | None]]:
         """Get dictionary of dependencies to download."""
@@ -258,7 +312,7 @@ class MavenLockfile:
 
         return result
 
-    def get_parent_pom_to_download(self):
+    def get_parent_pom_to_download(self) -> dict[str, dict[str, str | None]]:
         result = {}
 
         pom = self.lockfile_data.get("pom", {})

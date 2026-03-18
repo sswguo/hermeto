@@ -11,6 +11,8 @@ import pendulum
 from hermeto.core.errors import PackageRejected
 from hermeto.core.models.input import Request
 from hermeto.core.models.output import EnvironmentVariable, RequestOutput
+from hermeto.core.models.property_semantics import PropertySet
+from hermeto.core.models.sbom import Component, create_backend_annotation
 from hermeto.core.package_managers.general import async_download_files
 from hermeto.core.package_managers.maven.models import (
     MavenComponent,
@@ -28,16 +30,38 @@ log = logging.getLogger(__name__)
 DEFAULT_LOCKFILE = "lockfile.json"
 
 
+def _generate_component_list(maven_components: list[MavenComponent]) -> list[Component]:
+    """Convert MavenComponent objects into SBOM Component objects."""
+    return [
+        Component(
+            name=c.name,
+            version=c.version,
+            purl=c.purl,
+            properties=PropertySet(maven_scope=c.scope).to_properties(),
+        )
+        for c in maven_components
+    ]
+
+
 def fetch_maven_source(request: Request) -> RequestOutput:
     """Resolve and fetch Maven dependencies for the given request."""
     deps_dir = request.output_dir.join_within_root("deps", "maven")
     deps_dir.path.mkdir(parents=True, exist_ok=True)
 
+    maven_components: list[MavenComponent] = []
     for package in request.maven_packages:
-        _resolve_maven(request.source_dir.join_within_root(package.path), deps_dir)
+        maven_components.extend(
+            _resolve_maven(request.source_dir.join_within_root(package.path), deps_dir)
+        )
+
+    components = _generate_component_list(maven_components)
+    annotations = []
+    if backend_annotation := create_backend_annotation(components, "x-maven"):
+        annotations.append(backend_annotation)
 
     return RequestOutput.from_obj_list(
-        components=[],
+        components=components,
+        annotations=annotations,
         environment_variables=[
             EnvironmentVariable(
                 name="MAVEN_OPTS", value="-Dmaven.repo.local=${output_dir}/deps/maven"
@@ -63,22 +87,17 @@ def _resolve_maven(package_dir: RootedPath, deps_dir: RootedPath) -> list[MavenC
     extensions = lockfile.get_extensions_to_download()
     pom = lockfile.get_parent_pom_to_download()
 
-    _download_maven_artifacts(deps_dir.path, dependencies, plugins, boms, extensions, pom)
-    # TODO: Return SBOM components
-    return []
+    maven_stuff = {**dependencies, **plugins, **boms, **extensions, **pom}
+
+    _download_maven_artifacts(deps_dir.path, maven_stuff)
+    return lockfile.get_sbom_components(maven_stuff)
 
 
 def _download_maven_artifacts(
     deps_dir: Path,
-    dependencies: dict[str, dict[str, Any]],
-    plugins: dict[str, dict[str, Any]],
-    boms: dict[str, dict[str, Any]],
-    extensions: dict[str, dict[str, Any]],
-    pom: dict[str, dict[str, Any]],
+    maven_stuff: dict[str, dict[str, Any]],
 ) -> None:
     """Download Maven dependencies."""
-    maven_stuff = {**dependencies, **plugins, **boms, **extensions, **pom}
-
     download_paths, artifacts = _prepare_artifact_downloads(maven_stuff, deps_dir)
     pom_files, pom_checksums = _prepare_pom_and_checksum_downloads(maven_stuff, download_paths)
 
