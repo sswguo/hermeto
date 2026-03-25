@@ -34,6 +34,8 @@ def _extract_pom_chain(
         return
     _extract_artifact(pom, result)
     _extract_pom_chain(pom.get("parent"), result)
+    for bom in pom.get("boms", []):
+        _extract_pom_chain(bom, result)
 
 
 def _extract_dependency(
@@ -42,6 +44,7 @@ def _extract_dependency(
     """Collect an artifact, its full transitive subtree, pom parent chains, and bom imports."""
     _extract_artifact(artifact, result)
     _extract_pom_chain(artifact.get("parent"), result)
+    _extract_pom_chain(artifact.get("parentPom"), result)
     _extract_pom_chain(artifact.get("pom"), result)
     for bom in artifact.get("boms", []):
         _extract_pom_chain(bom, result)
@@ -165,6 +168,11 @@ class MavenDependency:
         """Get the pom dependencies."""
         return self._dependency_dict.get("pom", {})
 
+    @property
+    def parent_pom(self) -> dict[str, Any]:
+        """Get the pom dependencies."""
+        return self._dependency_dict.get("parentPom", {})
+
     def to_component(self) -> MavenComponent:
         """Convert to MavenComponent."""
         qualifiers: dict[str, str] = {"type": "jar"}
@@ -268,6 +276,7 @@ class MavenLockfile:
                     "version": dependency.version,
                 }
             _extract_pom_chain(dependency.pom, result)
+            _extract_pom_chain(dependency.parent_pom, result)
             for bom in dependency.boms:
                 _extract_pom_chain(bom, result)
 

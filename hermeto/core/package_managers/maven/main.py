@@ -10,7 +10,7 @@ import pendulum
 
 from hermeto.core.errors import PackageRejected
 from hermeto.core.models.input import Request
-from hermeto.core.models.output import EnvironmentVariable, RequestOutput
+from hermeto.core.models.output import EnvironmentVariable, ProjectFile, RequestOutput
 from hermeto.core.models.property_semantics import PropertySet
 from hermeto.core.models.sbom import Component, create_backend_annotation
 from hermeto.core.package_managers.general import async_download_files
@@ -28,6 +28,24 @@ from hermeto.core.rooted_path import RootedPath
 log = logging.getLogger(__name__)
 
 DEFAULT_LOCKFILE = "lockfile.json"
+
+# Maven settings.xml template for hermetic offline builds.
+# ${output_dir} is substituted by hermeto inject-files with the actual output directory path.
+_SETTINGS_XML_TEMPLATE = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<settings xmlns="http://maven.apache.org/SETTINGS/1.2.0"
+          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+          xsi:schemaLocation="http://maven.apache.org/SETTINGS/1.2.0 https://maven.apache.org/xsd/settings-1.2.0.xsd">
+  <localRepository>${output_dir}/deps/maven</localRepository>
+  <mirrors>
+    <mirror>
+      <id>hermeto-local</id>
+      <mirrorOf>*</mirrorOf>
+      <url>file://${output_dir}/deps/maven</url>
+    </mirror>
+  </mirrors>
+</settings>
+"""
 
 
 def _generate_component_list(maven_components: list[MavenComponent]) -> list[Component]:
@@ -59,15 +77,23 @@ def fetch_maven_source(request: Request) -> RequestOutput:
     if backend_annotation := create_backend_annotation(components, "x-maven"):
         annotations.append(backend_annotation)
 
+    settings_xml = ProjectFile(
+        abspath=request.output_dir.path / "settings.xml",
+        template=_SETTINGS_XML_TEMPLATE,
+    )
+
     return RequestOutput.from_obj_list(
         components=components,
         annotations=annotations,
         environment_variables=[
             EnvironmentVariable(
+                name="MAVEN_ARGS", value="-s ${output_dir}/settings.xml"
+            ),
+            EnvironmentVariable(
                 name="MAVEN_OPTS", value="-Dmaven.repo.local=${output_dir}/deps/maven"
-            )
+            ),
         ],
-        project_files=[],
+        project_files=[settings_xml],
     )
 
 
@@ -105,7 +131,7 @@ def _download_maven_artifacts(
     asyncio.run(_async_download_optional_files(pom_checksums))
 
     _verify_and_save_checksums(maven_stuff, download_paths)
-    _create_remote_repositories_files(artifacts)
+    #_create_remote_repositories_files(artifacts)
 
 
 def _prepare_artifact_downloads(
