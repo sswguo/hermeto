@@ -1420,9 +1420,9 @@ pytest-cov==7.0.0 \
     --hash=sha256:33c97eda2e049a0c5298e91f519302a1334c26ac65c1a483d6206fd458361af1 \
     --hash=sha256:3b8e9558b16cc1479da72058bdecf8073661c7f57f7d3c5f22a1c23507f2d861
     # via hermeto (pyproject.toml)
-pytest-env==1.5.0 \
-    --hash=sha256:89a15686ac837c9cd009a8a2d52bd55865e2f23c82094247915dae4540c87161 \
-    --hash=sha256:db8994b9ce170f135a37acc09ac753a6fc697d15e691b576ed8d8ca261c40246
+pytest-env==1.6.0 \
+    --hash=sha256:1e7f8a62215e5885835daaed694de8657c908505b964ec8097a7ce77b403d9a3 \
+    --hash=sha256:ac02d6fba16af54d61e311dd70a3c61024a4e966881ea844affc3c8f0bf207d3
     # via hermeto (pyproject.toml)
 python-dateutil==2.9.0.post0 \
     --hash=sha256:37dd54208da7e1cd875388217d5e00ebd4179249f90fb72437e91a35459a0ad3 \
