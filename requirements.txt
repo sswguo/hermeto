@@ -451,9 +451,9 @@ idna==3.11 \
     # via
     #   requests
     #   yarl
-importlib-metadata==8.7.0 ; python_full_version < '3.10.2' \
-    --hash=sha256:d13b81ad223b890aa16c5471f2ac3056cf76c5f10f82d6f9292f0b415f389000 \
-    --hash=sha256:e5dd1551894c77868a30651cef00984d50e1002d06942a7101d34870c5f02afd
+importlib-metadata==9.0.0; python_full_version < '3.10.2' \
+    --hash=sha256:2d21d1cc5a017bd0559e36150c21c830ab1dc304dedd1b7ea85d20f45ef3edd7 \
+    --hash=sha256:a4f57ab599e6a2e3016d7595cfd72eb4661a5106e787a95bcc90c7105b831efc
     # via build
 mailbits==0.2.3 \
     --hash=sha256:13140be94825d440986dee0a6e653d81d3b4df4b0059fbdb6d78ba8ccb0c4ec0 \
